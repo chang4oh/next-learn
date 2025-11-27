@@ -52,38 +52,48 @@ export async function fetchLatestInvoices() {
 
 export async function fetchCardData() {
   try {
-    // You can probably combine these into a single SQL query
-    // However, we are intentionally splitting them to demonstrate
-    // how to initialize multiple queries in parallel with JS.
-    const invoiceCountPromise = sql`SELECT COUNT(*) FROM invoices`;
-    const customerCountPromise = sql`SELECT COUNT(*) FROM customers`;
-    const invoiceStatusPromise = sql`SELECT
-         SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS "paid",
-         SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS "pending"
-         FROM invoices`;
+    const invoiceCountPromise = sql`SELECT COUNT(*) AS count FROM invoices`;
+    const customerCountPromise = sql`SELECT COUNT(*) AS count FROM customers`;
+    const invoiceStatusPromise = sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) AS paid,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) AS pending
+      FROM invoices
+    `;
 
-    const data = await Promise.all([
+    const [invoiceCount, customerCount, invoiceStatus] = await Promise.all([
       invoiceCountPromise,
       customerCountPromise,
       invoiceStatusPromise,
     ]);
 
-    const numberOfInvoices = Number(data[0].count ?? '0');
-    const numberOfCustomers = Number(data[1].count ?? '0');
-    const totalPaidInvoices = formatCurrency(data[2][0].paid ?? '0');
-    const totalPendingInvoices = formatCurrency(data[2][0].pending ?? '0');
+    // universal extractor for any result shape
+    const extractRow = (res: any) => {
+      if (!res) return {};
+      if (Array.isArray(res)) return res[0] ?? {};
+      if (res.rows) return res.rows[0] ?? {};
+      return res;
+    };
+
+    const invoiceRow = extractRow(invoiceCount);
+    const customerRow = extractRow(customerCount);
+    const statusRow = extractRow(invoiceStatus);
 
     return {
-      numberOfCustomers,
-      numberOfInvoices,
-      totalPaidInvoices,
-      totalPendingInvoices,
+      numberOfInvoices: Number(invoiceRow.count ?? 0),
+      numberOfCustomers: Number(customerRow.count ?? 0),
+      totalPaidInvoices: formatCurrency(statusRow.paid ?? 0),
+      totalPendingInvoices: formatCurrency(statusRow.pending ?? 0),
     };
   } catch (error) {
-    console.error('Database Error:', error);
-    throw new Error('Failed to fetch card data.');
+    console.error("Database Error:", error);
+    throw new Error("Failed to fetch card data.");
   }
 }
+
+
+
+
 
 const ITEMS_PER_PAGE = 6;
 export async function fetchFilteredInvoices(
